@@ -1,4 +1,4 @@
-package com.jaroidx.asyncutor;
+package com.juhalion.asyncutor;
 
 import android.content.Context;
 
