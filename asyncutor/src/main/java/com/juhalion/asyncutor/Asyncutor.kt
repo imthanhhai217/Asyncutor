@@ -1,115 +1,97 @@
-package com.juhalion.asyncutor;
+package com.juhalion.asyncutor
 
-import android.os.Handler;
-import android.os.Looper;
-import android.util.Log;
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
+import androidx.annotation.AnyThread
+import androidx.annotation.MainThread
+import androidx.annotation.WorkerThread
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
+import java.util.concurrent.atomic.AtomicBoolean
 
-import androidx.annotation.AnyThread;
-import androidx.annotation.MainThread;
-import androidx.annotation.Nullable;
-import androidx.annotation.WorkerThread;
+abstract class Asyncutor<Params, Progress, Result> {
+    private val handler = Handler(Looper.getMainLooper())
+    private val cancelled = AtomicBoolean(false)
+    private var result: Result? = null
+    private var resultFuture: Future<Result>? = null
+    private var executorService: ExecutorService = Executors.newSingleThreadExecutor()
 
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.atomic.AtomicBoolean;
+    @get:AnyThread
+    var status = Status.PENDING
+        private set
 
-public abstract class Asyncutor<Params, Progress, Result> {
-    private final Handler handler = new Handler(Looper.getMainLooper());
-    private final AtomicBoolean cancelled = new AtomicBoolean(false);
-    private Result result;
-    private Future<Result> resultFuture;
-    private ExecutorService executorService;
-    private Status status = Status.PENDING;
-
-    protected abstract Result doInBackground(Params params);
-
-    protected void onPreExecuted() {
-    }
-
-    protected void onPostExecuted(Result result) {
-    }
-
-    protected void onProgressUpdate(Progress progress) {
-
-    }
-
+    protected abstract fun doInBackground(params: Params?): Result
+    protected fun onPreExecuted() {}
+    protected open fun onPostExecuted(result: Result?) {}
+    protected fun onProgressUpdate(progress: Progress) {}
     @WorkerThread
-    protected void onPublishProgress(Progress progress) {
+    protected fun onPublishProgress(progress: Progress) {
         if (!isCancelled()) {
-            handler.post(() -> onProgressUpdate(progress));
+            handler.post { onProgressUpdate(progress) }
         }
     }
 
-    protected void onCancelled() {
-
-    }
-
-    protected void onCancelled(Result result) {
-        onCancelled();
+    private fun onCancelled() {}
+    protected fun onCancelled(result: Result) {
+        onCancelled()
     }
 
     @AnyThread
-    public final boolean isCancelled() {
-        return cancelled.get();
-    }
-
-    @AnyThread
-    public final Status getStatus() {
-        return status;
+    fun isCancelled(): Boolean {
+        return cancelled.get()
     }
 
     @MainThread
-    public final void cancel(boolean mayInterruptIfRunning) {
-        cancelled.set(true);
+    fun cancel(mayInterruptIfRunning: Boolean) {
+        cancelled.set(true)
         if (resultFuture != null) {
-            resultFuture.cancel(mayInterruptIfRunning);
+            resultFuture!!.cancel(mayInterruptIfRunning)
         }
     }
 
-    protected boolean isShutdown() {
-        return executorService.isShutdown();
-    }
+    protected val isShutdown: Boolean = executorService.isShutdown
 
     @MainThread
-    public final Future<Result> execute(@Nullable Params params) {
-        status = Status.RUNNING;
-        onPreExecuted();
+    fun execute(params: Params?): Future<Result>? {
+        status = Status.RUNNING
+        onPreExecuted()
         try {
-            executorService = Executors.newSingleThreadExecutor();
-            Callable<Result> backgroundCallback = () -> doInBackground(params);
-            resultFuture = executorService.submit(backgroundCallback);
-            executorService.submit(this::getResult);
-            return resultFuture;
-        } catch (Exception e) {
-            e.printStackTrace();
+            val backgroundCallback = Callable { doInBackground(params) }
+            resultFuture = executorService.submit(backgroundCallback)
+            executorService.submit(getResult())
+            return resultFuture
+        } catch (e: Exception) {
+            e.printStackTrace()
         } finally {
-            if (executorService != null) {
-                executorService.shutdown();
-            }
+            executorService.shutdown()
         }
-        return null;
+        return null
     }
 
-    private Runnable getResult() {
-        return () -> {
+    private fun getResult(): Runnable? {
+        val runnable = Runnable {
             try {
                 if (!isCancelled()) {
-                    result = resultFuture.get();
-                    handler.post(() -> onPostExecuted(result));
+                    result = resultFuture!!.get()
+                    handler.post { onPostExecuted(result) }
                 } else {
-                    handler.post(this::onCancelled);
+                    handler.post { onCancelled() }
                 }
-                status = Status.FINISHED;
-            } catch (InterruptedException | ExecutionException e) {
-                Log.e("TAG", "Exception while trying to get result" + e.getMessage());
+                status = Status.FINISHED
+            } catch (e: InterruptedException) {
+                Log.e("TAG", "Exception while trying to get result" + e.message)
+            } catch (e: ExecutionException) {
+                Log.e("TAG", "Exception while trying to get result" + e.message)
             }
-        };
+        }
+        return runnable
     }
 
-    public enum Status {
+    enum class Status {
         FINISHED, PENDING, RUNNING
     }
 }
